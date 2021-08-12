@@ -1,0 +1,1 @@
+python train_imagenet.py --data imagenet_path --save output_dir
