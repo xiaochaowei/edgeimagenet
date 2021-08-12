@@ -90,6 +90,7 @@ parser.add_argument('--high_threshold', default=0.3, type=float)
 parser.add_argument('--low_threshold', default=0.2, type=float)
 parser.add_argument('--thres', default=0.3, type=float)
 parser.add_argument('--data', default='/home/cxiao/imagenet/dataset', type=str)
+parser.add_argument('--eps', default=4, type=float)
 
 args = parser.parse_args()
 state = {k: v for k, v in args._get_kwargs()}
@@ -116,6 +117,28 @@ def main():
     if not os.path.isdir(args.save):
         mkdir_p(args.save)
 
+    
+    # Model
+    print("==> creating model '{}'".format(args.arch))
+
+    # model = Net3()
+    # model = models.__dict__['resnet18']()
+    model = models.__dict__['resnet50'](pretrained=True)
+
+    # model = models.__dict__['resnet18']()
+    # model = models.__dict__['wideresnet']()
+    # model = model.cuda()
+    # model = torch.nn.parallel.DistributedDataParallel(model)
+    model = torch.nn.DataParallel(model).cuda()
+    cudnn.benchmark = True
+    print('    Total params: %.2fM' % (sum(p.numel() for p in model.parameters())/1000000.0))
+
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
+
+    edgenet = cnnedge.CNNEdge(args)
+    
+    
     traindir = os.path.join(args.data, 'train')
     valdir = os.path.join(args.data, 'val')
     ngpus_per_node = torch.cuda.device_count()
@@ -145,26 +168,6 @@ def main():
         ])), batch_size=args.test_batch, shuffle=False,
         num_workers=args.workers, pin_memory=True)
 
-
-    # Model
-    print("==> creating model '{}'".format(args.arch))
-
-    # model = Net3()
-    # model = models.__dict__['resnet18']()
-    model = models.__dict__['resnet50'](pretrained=True)
-
-    # model = models.__dict__['resnet18']()
-    # model = models.__dict__['wideresnet']()
-    # model = model.cuda()
-    # model = torch.nn.parallel.DistributedDataParallel(model)
-    model = torch.nn.DataParallel(model).cuda()
-    cudnn.benchmark = True
-    print('    Total params: %.2fM' % (sum(p.numel() for p in model.parameters())/1000000.0))
-
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
-
-    edgenet = cnnedge.CNNEdge(args)
 
     # Resume
     title = 'ImnagenNet'
@@ -220,13 +223,13 @@ def main():
                 'best_acc': best_acc,
                 'optimizer' : optimizer.state_dict(),
             }, is_best, checkpoint=args.save)
-        print('best acc:')
-        print(best_acc)
+        print('best acc: {}, test acc: {}'.format(best_acc, test_acc))
+        # print(best_acc)
 
         if adv_acc > best_adv:
             best_adv = adv_acc
-        print('best adv:')
-        print(best_adv)
+        print('best adv: {}, test_adv: {}'.format(best_adv, adv_acc))
+        # print(best_adv)
 
     logger.close()
 
@@ -386,7 +389,7 @@ def test_adv(testloader, model, edgenet, criterion, epoch, use_cuda):
     model.eval()
 
     end = time.time()
-    attack = LinfPGDAttack(k=10, epsilon=4/255, alpha=2/255)
+    attack = LinfPGDAttack(k=10, epsilon=4/255.0, alpha=2/255)
     two_nets = cnnedge.InterpNets2(edgenet, model, '1', '2')
     two_nets.eval()
 
